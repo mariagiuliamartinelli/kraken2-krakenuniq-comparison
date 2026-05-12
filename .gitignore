@@ -33,3 +33,8 @@ Rplot*.pdf
 
 # OS
 .DS_Store
+
+# Report e presentazioni — privati fino alla pubblicazione
+*.pdf
+*.pptx
+*.pages
