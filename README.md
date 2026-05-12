@@ -50,5 +50,6 @@ source("pathogen_screen.R")          # pathogen read counts
 
 ## Author
 
-Mariagiulia Martinelli — Erasmus, Università degli Studi di Napoli Federico II  
-Supervisors: Gonzalo Giribet (Harvard) / Elisa
+**Mariagiulia Martinelli**  
+Sapienza University of Rome | Centre for Palaeogenetics, Stockholm University  
+Supervisor: Gonzalo Orteo Garcia
