@@ -1,4 +1,4 @@
-# Kraken2 vs KrakenUniq — Family-level Taxonomic Comparison
+# Kraken2 vs KrakenUniq: Family-level Taxonomic Comparison
 
 Analysis scripts for comparing two metagenomic classification pipelines applied to ancient DNA samples from archaeological necropolises in the Valencia area (Roman, Visigothic, Islamic, Medieval, and Christian periods).
 
