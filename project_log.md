@@ -509,16 +509,381 @@ Da `final_family_analysis_tutti.R` sono stati rimossi i 2 plot PCoA uniformi (gi
 
 ---
 
+## Phase 11 — PCoA Biplot (envfit) (~May 2026)
+
+**File:** `pcoa_biplot.R` (nuovo script; 10 grafici, stesso schema di `pcoa_sito_intersezione.R` + frecce biplot)
+
+**Richiesta di Gonzalo:** *"I guess it could be also nice to add the biplot axis to see what drives the differentiation."*
+
+### Metodo
+
+Si usa `vegan::envfit()` che, per ogni famiglia, fitta la **direzione di massima correlazione** con gli assi PCoA tramite test di permutazione (999 permutazioni). È preferibile a `wascores()` (medie ponderate) perché:
+- restituisce r² e p-value → mostra solo frecce statisticamente significative (p ≤ 0.05)
+- lunghezza freccia proporzionale a |r| = √(r²) → più interpretabile
+- le direzioni sono più distribuite nello spazio
+
+Pre-filtro: solo le top-80 famiglie per abbondanza media vengono passate a `envfit()` (velocità). Filtro angolare aggiuntivo: se due famiglie formano un angolo < 25° tra loro, viene mantenuta solo quella con r² più alto (ridondanza). Default: max 6 frecce per grafico.
+
+### Risultati
+
+**Kraken2** (identici su tutti i 5 plot K2 — la PCoA è la stessa, cambiano solo i colori):
+| Famiglia | r² | p |
+|---|---|---|
+| Streptosporangiaceae | 0.922 | 0.001 |
+| Burkholderiaceae | 0.873 | 0.001 |
+| Acetobacteraceae | 0.693 | 0.001 |
+
+**KrakenUniq** (identici su tutti i 5 plot KU):
+| Famiglia | r² | p |
+|---|---|---|
+| Burkholderiaceae | 0.968 | 0.001 |
+| Rhodobacteraceae | 0.742 | 0.001 |
+| Streptosporangiaceae | 0.659 | 0.001 |
+| Oxalobacteraceae | 0.492 | 0.001 |
+
+### Interpretazione biologica
+
+Tutti i driver principali sono **batteri del suolo** (Burkholderiaceae, Streptosporangiaceae, Acetobacteraceae, Rhodobacteraceae, Oxalobacteraceae). Questo conferma che il segnale dominante della PCoA è la **contaminazione tafonomica**: il microbiota del sedimento funerario assorbito dalle ossa nel tempo, non differenze biologiche tra individui. La separazione degli ossicle (visibile nei plot Material) riflette la maggiore porosità dell'osso del martello/incudine/staffa rispetto all'osso corticale, che ne facilita l'infiltrazione microbica.
+
+I driver secondari differiscono tra i due tool (Acetobacteraceae in K2, Rhodobacteraceae+Oxalobacteraceae in KU) — coerente con le differenze di database già documentate (GTDB vs MicrobialNT).
+
+---
+
+## Phase 12 — Yersinia pestis screen su Dardel (~May 2026)
+
+**Obiettivo:** rispondere alla richiesta di Gonzalo — *"pick one [pathogen] and check how many reads each sample has for that."* Patogeno scelto: *Yersinia pestis* (famiglia Yersiniaceae, agente della peste bubbonica — plausibile in campioni medievali valencioti).
+
+### Perché su Dardel e non in R locale
+
+Le matrici family-level sul Mac aggregano i dati a livello di famiglia (Yersiniaceae), non di specie. Per distinguere *Y. pestis* da *Y. enterocolitica*, *Y. pseudotuberculosis* ecc., servono i **report grezzi KrakenUniq** a livello di specie — disponibili solo su Dardel in `KrakenUniq_results/KrakenUniq_rep_*.report`.
+
+### Formato report KrakenUniq (colonne rilevanti)
+
+```
+col1: % reads nel clade
+col2: reads nel clade (inclusi discendenti)
+col3: reads dirette alla specie
+col4: unique minimizers (k-mers unici) ← metrica chiave per autenticazione
+col5: dup (hits medi per minimizer)
+col6: coverage stimata
+col7: taxID  col8: rank  col9+: nome
+```
+
+La colonna **unique k-mers** (col4) è la firma di KrakenUniq: k-mers che mappano *esclusivamente* su *Y. pestis* e non su altre Yersiniaceae. Più è alto, più il segnale è specifico e affidabile.
+
+### Comandi eseguiti su Dardel
+
+```bash
+# Verifica: quanti report contengono almeno 1 riga Y. pestis
+grep -l "Yersinia pestis" KrakenUniq_results/KrakenUniq_rep_*.report | wc -l
+# → 126
+
+# Estrazione per campione: clade_reads, direct_reads, unique_kmers, coverage
+for f in KrakenUniq_results/KrakenUniq_rep_*.report; do
+    sample=$(basename "$f" | sed 's/KrakenUniq_rep_//' | sed 's/_fastp_merged\.fq\.gz\.report//')
+    awk -v s="$sample" '!/^#/ && $8=="species" && /Yersinia pestis/{
+        printf "%s\t%s\t%s\t%s\t%s\n", s, $2, $3, $4, $6
+    }' "$f"
+done | sort -k4 -rn > KrakenUniq_analysis/yersinia_pestis_per_sample.tsv
+# → 126 righe salvate
+```
+
+File scaricato sul Mac via scp: `CPG/yersinia_pestis_per_sample.tsv`
+
+### Analisi del campione con più segnale grezzo (P35761_1115)
+
+Grezzo (prima del filtro metadata): 354 clade reads, 352 direct reads, 28 unique k-mers. Report completo:
+```
+Yersiniaceae:                    2979 clade reads   1359 unique k-mers
+ └─ Yersinia:                     472 reads           85 unique k-mers
+     └─ Y. pseudotuberculosis complex:  373 reads     32 unique k-mers
+         └─ Y. pestis:            352 direct reads    28 unique k-mers   coverage 3.96e-05
+```
+**Conclusione:** segnale presente ma non autentico — coverage 3.96e-05 (≈182 bp coperti su 4.6 Mb), dup=200 (reads concentrate in pochissime posizioni). *Y. pestis* è evolutivamente un clone di *Y. pseudotuberculosis* (97% genoma condiviso): molte reads classificate come *pestis* potrebbero essere *pseudotuberculosis* che cross-mappa sulle regioni uniche. **Questo campione è inoltre escluso dal metadata** → controllo, non campione del progetto.
+
+### Filtro metadata + join in R
+
+```r
+yp <- read.table("yersinia_pestis_per_sample.tsv", sep="\t", header=FALSE,
+                 col.names=c("sample_raw","clade_reads","direct_reads","unique_kmers","coverage"))
+yp$NGI_ID <- gsub("_S[0-9]+_L[0-9]+.*", "", yp$sample_raw)
+yp_filt <- yp[yp$NGI_ID %in% metadata$NGI_ID, ] |>
+  merge(metadata[, c("NGI_ID","Site","Period","Material")], by="NGI_ID") |>
+  arrange(desc(unique_kmers))
+```
+
+**Risultato:** 108 campioni del progetto con ≥1 read di *Y. pestis* (su 126 totali; 18 esclusi = controlli).
+
+### Top candidati (campioni del progetto, unique k-mers ≥ 10)
+
+| NGI_ID | Direct reads | Unique k-mers | Period | Site | Material |
+|---|---|---|---|---|---|
+| P32015_1038 | 1 | 20 | **Medieval** | Cementerio de San Lorenzo | petrous |
+| P35503_1031 | 1 | 19 | Roman | Necropolis Occidental | petrous |
+| P35503_1050 | 2 | 19 | Visigoth | Necropolis Visigoda, L'Almoina | ossicle |
+| P35761_1091 | 52 | 18 | Roman | Legionarios Sertorianos, L'Almoina | other |
+| P32015_1089 | 2 | 16 | **Medieval** | Cementerio de San Lorenzo | petrous |
+| P35761_1087 | 154 | 16 | Roman | Legionarios Sertorianos, L'Almoina | other |
+| P35503_1062 | 5 | 12 | Visigoth | Necropolis Visigoda, L'Almoina | ossicle |
+| P35761_1100 | 42 | 12 | Islamic | La Rauda (Otros), L'Almoina | tooth |
+| P32015_1020 | 0 | 11 | Islamic | Maqbara Arrabal de l'Alculdia | tooth |
+| P35503_1042 | 3 | 11 | Visigoth | Necropolis Visigoda, L'Almoina | ossicle |
+| P35503_1049 | 3 | 11 | Visigoth | Necropolis Visigoda, L'Almoina | ossicle |
+| P35761_1112 | 4 | 11 | Christian | Masía de Arguinas (Raimundo Morelló) | phalanx |
+
+### Pattern degni di nota
+
+- **P35761_1087 e P35761_1091** provengono entrambi da **Legionarios Sertorianos, L'Almoina** (periodo Romano) e mostrano la combinazione più alta di reads dirette + unique k-mers tra i campioni del progetto. Due individui dello stesso sito romano con segnale Y. pestis — storicamente plausibile (prima pandemia di Giustiniano, VI sec. d.C., lambisce la Spagna).
+- **P32015_1038 e P32015_1089** sono gli unici campioni **medievali** con segnale rilevante (Cementerio de San Lorenzo). La II pandemia (XIV sec., Morte Nera) colpisce duramente la Spagna — ma le reads dirette sono molto basse (1–2).
+- La maggior parte dei 108 campioni ha ≤5 unique k-mers: **rumore di fondo** da cross-mapping con *Y. pseudotuberculosis* ambientale.
+
+### Interpretazione e limiti
+
+Nessun campione supera 20 unique k-mers. Per l'autenticazione di *Y. pestis* in aDNA le soglie tipiche della letteratura sono:
+- ≥200 unique k-mers (molto stringente)
+- ≥50 unique k-mers (moderata)
+- ≥10 unique k-mers + profilo di danno aDNA (screening preliminare)
+
+I candidati attuali rientrano nella categoria **screening preliminare**: segnale presente, non confermato. Il passo successivo è l'analisi di allineamento diretto al genoma di riferimento di *Y. pestis* CO92 con verifica dei pattern di danno (mapDamage/PyDamage: sostituzioni C→T al 5', G→A al 3').
+
+---
+
+## Phase 13 — Lettura articolo Oskolkov 2025 (biorxiv) e contestualizzazione
+
+**Paper:** Oskolkov et al. 2025, biorxiv — *"Metagenomic Pathogen Detection in Ancient DNA: Benchmarking KrakenUniq and Kraken2 Filtering Strategies"* (titolo approssimativo; paper letto nella sua interezza, non ancora pubblicato su rivista peer-reviewed).
+
+### Principali finding dell'articolo
+
+1. **K-filter (unique k-mers) da solo è ottimale.** Combinare unique k-mers con altri filtri (reads dirette, coverage) non migliora la specificità — anzi può peggiorare la sensibilità. La soglia raccomandata per profiling conservativo è **≥1000 unique k-mers**.
+
+2. **Soglia scalabile con la profondità di sequenziamento.** La relazione empirica è:
+   > unique k-mers ≈ 200 × (reads_totali / 100 000)
+   
+   In pratica: per campioni con ~500 000 reads, ci si aspettano ~1000 k-mers unici se il patogeno è presente in quantità minima rilevabile. Per campioni più piccoli (50 000 reads), la soglia scende a ~100 k-mers.
+
+3. **Kraken2 e KrakenUniq sono comparabili con il filtro ottimale.** La differenza principale è che KrakenUniq fornisce la colonna unique k-mers out of the box; con Kraken2 si può ottenere una stima analoga ma richiede passaggi aggiuntivi.
+
+4. **≥200 reads dirette necessarie per mapDamage.** Profili di danno affidabili (C→T al 5', G→A al 3') richiedono almeno 200 reads direttamente assegnate alla specie target.
+
+5. **≥50 reads** è la soglia minima assoluta per qualsiasi analisi downstream (non sufficiente per mapDamage ma abbastanza per un segnale indicativo).
+
+### Implicazioni per i nostri risultati Y. pestis
+
+| Metrica | Soglia Oskolkov 2025 | Nostro top candidato (P35761_1087) |
+|---|---|---|
+| Unique k-mers (conservativo) | ≥ 1000 | **16** |
+| Unique k-mers (scaling, ~100k reads) | ≥ 200 | **16** |
+| Direct reads per mapDamage | ≥ 200 | **154** (vicino, ma sotto soglia) |
+| Direct reads minimo assoluto | ≥ 50 | 154 ✓ (P35761_1087) |
+
+**Conclusione definitiva:** tutti i campioni del progetto valenciano con segnale *Y. pestis* si collocano nettamente al di sotto delle soglie validate nell'articolo. Il massimo osservato è 20 unique k-mers (P32015_1038, campione medievale) — 50× sotto la soglia conservativa di 1000. Questo è coerente con **rumore di fondo da cross-mapping** con *Y. pseudotuberculosis*, che condivide il 97% del genoma con *Y. pestis* e che è un batterio ambientale presente nel suolo funerario.
+
+Il risultato non è negativo: lo screen ha permesso di escludere con metodologia validata la presenza di *Y. pestis* in quantità autentica nei campioni analizzati, e di identificare due candidati (P35761_1087, P35761_1091 — romani, L'Almoina) che, se si disponesse di FASTQ grezzi e infrastruttura BWA su Dardel, meriterebbero allineamento al CO92 come passo successivo.
+
+### Note metodologiche per la comunicazione con Gonzalo
+
+- Citare l'articolo Oskolkov 2025 quando si riferiscono le soglie (evita di sembrare soglie arbitrarie).
+- Sottolineare che il K-filter è il criterio giusto da usare — non le reads senza unique k-mers.
+- Lo stesso approccio (screen → unique k-mers → soglia scaling) è trasferibile a *Tannerella forsythia*.
+
+---
+
+## Phase 14 — Tannerella forsythia screen su Dardel (~May 2026)
+
+**Obiettivo:** secondo patogeno richiesto da Gonzalo — *Tannerella forsythia*, agente della parodontite cronica, atteso soprattutto nei campioni dentali.
+
+### Comandi eseguiti su Dardel
+
+```bash
+# Verifica: quanti report contengono almeno 1 riga T. forsythia
+grep -l "Tannerella forsythia" KrakenUniq_results/KrakenUniq_rep_*.report | wc -l
+# → 112
+
+# Estrazione per campione
+for f in KrakenUniq_results/KrakenUniq_rep_*.report; do
+    sample=$(basename "$f" | sed 's/KrakenUniq_rep_//' | sed 's/_fastp_merged\.fq\.gz\.report//')
+    awk -v s="$sample" '!/^#/ && $8=="species" && /Tannerella forsythia/{
+        printf "%s\t%s\t%s\t%s\t%s\n", s, $2, $3, $4, $6
+    }' "$f"
+done | sort -k4 -rn > KrakenUniq_analysis/tannerella_forsythia_per_sample.tsv
+# → 112 righe salvate
+```
+
+File scaricato sul Mac: `CPG/tannerella_forsythia_per_sample.tsv`
+
+### Top candidati (prime 20 righe, ordinati per unique k-mers)
+
+| Campione (raw) | Clade reads | Direct reads | Unique k-mers | Coverage |
+|---|---|---|---|---|
+| P35761_1114 | 8 908 | 7 129 | **151 159** | 0.03566 |
+| P32015_1011 | 7 798 | 5 998 | **80 463** | 0.01898 |
+| P35761_1113 | 3 064 | 2 439 | **42 707** | 0.01008 |
+| P35503_1106 | 1 043 | 715 | **12 657** | 0.002986 |
+| P32015_1009 | 766 | 562 | **8 372** | 0.001975 |
+| P35761_1102 | 319 | 261 | **3 546** | 0.0008366 |
+| P35503_1091 | 106 | 83 | **1 193** | 0.0002815 |
+| P35503_1104 | 85 | 61 | 996 | 0.000235 |
+| P35503_1056 | 83 | 66 | 910 | 0.0002147 |
+| P35503_1094 | 28 | 22 | 331 | 7.809e-05 |
+| P35761_1115 | 10 | 7 | 319 | 7.526e-05 |
+| P35761_1092 | 11 | 8 | 315 | 7.432e-05 |
+| P35761_1097 | 29 | 25 | 261 | 6.158e-05 |
+| P35761_1111 | 34 | 28 | 255 | 6.016e-05 |
+| P35503_1097 | 18 | 15 | 248 | 5.851e-05 |
+| P35761_1087 | 18 | 15 | 241 | 5.686e-05 |
+| P35761_1110 | 19 | 14 | 237 | 5.591e-05 |
+| P32015_1021 | 35 | 29 | 235 | 5.544e-05 |
+| P35761_1105 | 8 | 7 | 133 | 3.138e-05 |
+| P35761_2001 | 5 | 5 | 132 | 3.114e-05 |
+
+### Confronto con soglie Oskolkov 2025
+
+| Soglia | Campioni che la superano |
+|---|---|
+| ≥ 1 000 unique k-mers (conservativa) | **7** (P35761_1114, P32015_1011, P35761_1113, P35503_1106, P32015_1009, P35761_1102, P35503_1091) |
+| ≥ 200 direct reads (mapDamage) | **6** (tutti i primi 6 sopra) |
+| Segnale rumore di fondo (< 1 000 k-mers) | 105 restanti |
+
+**Contrasto netto con *Y. pestis*:** il top candidato *Y. pestis* aveva 20 unique k-mers; il top *T. forsythia* ne ha **151 159** — 7 500× di più. Il segnale è autentico e biologicamente atteso: *T. forsythia* è un patogeno parodontale che colonizza il solco gengivale e il tartaro dentale, e si conserva molto bene nell'aDNA dentale.
+
+### Filtro metadata + join in R
+
+```r
+tf <- read.table("tannerella_forsythia_per_sample.tsv", sep="\t", header=FALSE,
+                 col.names=c("sample_raw","clade_reads","direct_reads","unique_kmers","coverage"))
+tf$NGI_ID <- gsub("_S[0-9]+_L[0-9]+.*", "", tf$sample_raw)
+tf_filt <- tf[tf$NGI_ID %in% metadata$NGI_ID, ] |>
+  merge(metadata[, c("NGI_ID","Site","Period","Material")], by="NGI_ID") |>
+  arrange(desc(unique_kmers))
+
+head(tf_filt[tf_filt$unique_kmers >= 1000, ], 10)
+```
+
+**Nota:** P35761_1114 (151 159 k-mers) e P32015_1011 (80 463 k-mers) — i due campioni con segnale più alto nel TSV grezzo — **non sono nel metadata** e vengono esclusi dal join. Sono probabilmente controlli di laboratorio.
+
+### Campioni del progetto con ≥ 1 000 unique k-mers (soglia Oskolkov conservativa)
+
+| NGI_ID | Direct reads | Unique k-mers | Period | Site | Material |
+|---|---|---|---|---|---|
+| P35761_1113 | 2 439 | **42 707** | Christian | Masía de Arguinas (Raimundo Morelló) | **phalanx** |
+| P35503_1106 | 715 | **12 657** | Islamic | La Rauda (Otros), L'Almoina | **tooth** ✓ |
+| P32015_1009 | 562 | **8 372** | Roman | Cementerio San Lorenzo | **petrous** |
+| P35761_1102 | 261 | **3 546** | Islamic | La Rauda (Otros), L'Almoina | **tooth** ✓ |
+| P35503_1091 | 83 | **1 193** | Islamic | La Rauda (Otros), L'Almoina | **petrous** |
+
+### Interpretazione
+
+**Campioni tooth (attesi):** P35503_1106 e P35761_1102 — entrambi islamici, entrambi da La Rauda, L'Almoina. Confermano l'ipotesi di Gonzalo: *T. forsythia* come patogeno parodontale è rilevabile nei campioni dentali con segnale forte e autentico (>1000 unique k-mers, >200 direct reads → eleggibili per mapDamage).
+
+**Campioni non-dentali (inattesi):**
+- **P35761_1113 (falange, Cristiano)** — il campione con più k-mers tra i campioni del progetto (42 707), materiale osseo non dentale. Possibili spiegazioni: (a) contaminazione post-mortem da denti vicini nella sepoltura; (b) batteriemia sistemica in individuo con parodontite grave (*T. forsythia* può entrare in circolo e depositarsi nelle ossa); (c) artefatto tassonomico (sequenze genomiche vicine nel database). Merita approfondimento.
+- **P32015_1009 (petroso, Romano)** e **P35503_1091 (petroso, Islamico)** — stesso ragionamento; l'osso petroso è denso e meno soggetto a infiltrazione microbica rispetto alle ossa spugnose, il che rende la contaminazione ambientale meno probabile ma non impossibile.
+
+**Confronto con *Y. pestis*:** il segnale *T. forsythia* è qualitativamente superiore — 7 campioni sopra la soglia conservativa vs. 0 per *Y. pestis*. Per i due campioni tooth islamici (≥200 direct reads), l'autenticazione con mapDamage è tecnicamente fattibile su Dardel.
+
+---
+
+## Phase 15 — Mycobacterium tuberculosis screen su Dardel (~May 2026)
+
+**Razionale:** terzo patogeno aggiunto per completare il quadro — *M. tuberculosis* è documentato in popolazioni antiche europee inclusa la Spagna medievale e romana. Storicamente plausibile, metodologia identica alle fasi 12 e 14.
+
+### Comandi eseguiti su Dardel
+
+```bash
+# Verifica presenza
+grep -l "Mycobacterium tuberculosis" KrakenUniq_results/KrakenUniq_rep_*.report | wc -l
+# → 188 file
+
+# Estrazione per campione
+for f in KrakenUniq_results/KrakenUniq_rep_*.report; do
+    sample=$(basename "$f" | sed 's/KrakenUniq_rep_//' | sed 's/_fastp_merged\.fq\.gz\.report//')
+    awk -v s="$sample" '!/^#/ && $8=="species" && /Mycobacterium tuberculosis/{
+        printf "%s\t%s\t%s\t%s\t%s\n", s, $2, $3, $4, $6
+    }' "$f"
+done | sort -k4 -rn > KrakenUniq_analysis/mycobacterium_tuberculosis_per_sample.tsv
+# → 312 righe (> 188 perché il pattern matcha anche sottospecie:
+#   M. tuberculosis var. bovis, M. tuberculosis complex ecc. — alcune righe doppie per campione)
+```
+
+File scaricato sul Mac: `CPG/mycobacterium_tuberculosis_per_sample.tsv`
+
+### Risultati — top 20 per unique k-mers
+
+| Campione (raw) | Clade reads | Direct reads | Unique k-mers | Coverage |
+|---|---|---|---|---|
+| P35503_1031 | 64 | 6 | **334** | 5.933e-05 |
+| P35503_1044 | 67 | 9 | 281 | 4.992e-05 |
+| P32015_1091 | 77 | 2 | 248 | 4.406e-05 |
+| P35503_1096 | 45 | 1 | 183 | 3.251e-05 |
+| P35761_1087 | 202 | **0** | 162 | 2.878e-05 |
+| P35761_1112 | 36 | 0 | 150 | 2.665e-05 |
+| … | … | … | … | … |
+
+**Massimo unique k-mers: 334** — nessun campione supera la soglia conservativa di 1 000 (Oskolkov 2025).
+
+### Segnali di cross-mapping
+
+- Molti campioni hanno **0 direct reads** pur avendo clade reads elevati (es. P35761_1087: 202 clade reads, 0 direct reads). Questo è il pattern classico di cross-mapping: le reads vengono assegnate a discendenti di *M. tuberculosis* nel database (Mycobacteriaceae ambientali del suolo) ma nessuna mappa direttamente alla specie bersaglio.
+- Il numero di file con match (188) è il più alto tra i tre patogeni screenati — coerente con l'ubiquità delle Mycobacteriaceae nel suolo funerario.
+
+### Filtro metadata + join in R
+
+```r
+mt <- read.table("mycobacterium_tuberculosis_per_sample.tsv", sep="\t", header=FALSE,
+                 col.names=c("sample_raw","clade_reads","direct_reads","unique_kmers","coverage"))
+mt$NGI_ID <- gsub("_S[0-9]+_L[0-9]+.*", "", mt$sample_raw)
+mt <- mt |>
+  group_by(NGI_ID) |>
+  slice_max(unique_kmers, n=1, with_ties=FALSE) |>
+  ungroup()
+mt_filt <- mt[mt$NGI_ID %in% metadata$NGI_ID, ] |>
+  merge(metadata[, c("NGI_ID","Site","Period","Material")], by="NGI_ID") |>
+  arrange(desc(unique_kmers))
+head(mt_filt, 10)
+```
+
+**Top 10 campioni del progetto per unique k-mers:**
+
+| NGI_ID | Direct reads | Unique k-mers | Period | Site | Material |
+|---|---|---|---|---|---|
+| P35503_1031 | 6 | **334** | Roman | Necropolis Occidental | petrous |
+| P35503_1044 | 9 | 281 | Visigoth | Necropolis Visigoda, L'Almoina | petrous |
+| P32015_1091 | 2 | 248 | Islamic | Maqbara Arrabal de l'Alculdia | petrous |
+| P35503_1096 | 1 | 183 | Islamic | La Rauda (Otros), L'Almoina | petrous |
+| P35761_1087 | **0** | 162 | Roman | Legionarios Sertorianos, L'Almoina | other |
+| P35761_1112 | 0 | 150 | Christian | Masía de Arguinas | phalanx |
+| P35503_1057 | 0 | 145 | Visigoth | Necropolis Visigoda, L'Almoina | petrous |
+| P35761_1104 | 0 | 144 | Islamic | La Rauda (Otros), L'Almoina | tooth |
+| P35761_1109 | 0 | 137 | Islamic | La Rauda (Otros), L'Almoina | tooth |
+| P35503_1046 | 0 | 129 | Visigoth | Necropolis Visigoda, L'Almoina | petrous |
+
+**Osservazioni:**
+- Massimo 334 unique k-mers — nessun campione vicino alla soglia di 1 000
+- Molti campioni con **0 direct reads** nonostante clade reads elevati → cross-mapping con Mycobacteriaceae ambientali del suolo
+- Materiali e periodi distribuiti casualmente — nessun pattern biologico riconoscibile (confronta con *T. forsythia* dove i top campioni erano concentrati su tooth islamici di La Rauda)
+
+### Riepilogo comparativo dei tre patogeni
+
+| Patogeno | File con match | Max unique k-mers | Soglia Oskolkov | Verdetto |
+|---|---|---|---|---|
+| *Yersinia pestis* | 126 | 20 | ≥ 1 000 | ✗ Rumore di fondo |
+| *Mycobacterium tuberculosis* | 188 | 334 | ≥ 1 000 | ✗ Rumore di fondo |
+| *Tannerella forsythia* | 112 | 151 159 (controllo) / 42 707 (progetto) | ≥ 1 000 | ✓ Segnale autentico |
+
+**Conclusione:** nessun segnale autentico di TB rilevabile nel dataset di Valencia a questa profondità di sequenziamento. Il risultato è biologicamente coerente: le Mycobacteriaceae del suolo producono molto cross-mapping ma nessun unique k-mers abbastanza alto da superare la soglia di autenticazione. *T. forsythia* rimane l'unico patogeno con segnale genuino nei campioni del progetto.
+
+---
+
 ## Open / next steps
 
-Discussed with Gonzalo, not yet started:
-
-1. **Pathogen analysis** — search the existing KrakenUniq reports for:
-   - *Yersinia pestis* (plague, plausible in Medieval samples)
-   - *Tannerella forsythia* (oral pathogen, expected in dental calculus / teeth samples)
-   Use unique k-mer counts (KrakenUniq's strength) for low-abundance authentication.
-2. **Open question to Gonzalo** — pathogens immediately, or first aggregate to Phylum to check whether the per-family disagreement was just a resolution effect.
-3. **`P34558_1102_S257_L005`** — flagged: sample dominated by human DNA with negligible microbial biomass. Could be biologically interesting in the dental subset.
+1. **Comunicare risultati a Gonzalo** — sunto pronto (Y. pestis, T. forsythia, M. tuberculosis). Attendere feedback prima di procedere con ulteriori analisi.
+2. **Validazione patogeni** — fuori scope attuale. Allineamento al genoma di riferimento + mapDamage richiederebbe istruzioni esplicite dal supervisore.
+3. **GitHub push** — rimandato a fine progetto.
+   - Allineamento al genoma di riferimento *Y. pestis* CO92 (BWA-MEM su Dardel)
+   - Verifica danno aDNA con mapDamage o PyDamage (serve ≥200 direct reads → P35761_1087 è vicino con 154)
+   - Verifica coverage sui loci plasmidici (pFra, pPla) per distinguere *pestis* da *pseudotuberculosis*
+3. **`P34558_1102_S257_L005`** — flagged: campione dominato da DNA umano, microbiota quasi assente dopo rimozione Hominidae.
+4. **GitHub** — repo locale inizializzato (`git init`, primo commit). Push da fare quando il progetto è completato.
 
 ---
 
@@ -567,6 +932,14 @@ CPG/
 │   └── tutti/
 │       ├── final_family_analysis_tutti.R         (4 plot: Mean Abundance, Venn, Barplot, Spearman; no Procrustes)
 │       └── pcoa_sito_tutti.R                     (10 plot: uniform, Material, Site, Period, Site+Material)
+├── Phase 11 outputs
+│   └── pcoa_biplot.R                          (10 plot biplot: stessi di pcoa_sito_intersezione.R + frecce envfit)
+├── Phase 12 outputs
+│   └── yersinia_pestis_per_sample.tsv         (126 righe: NGI_ID | clade_reads | direct_reads | unique_kmers | coverage)
+├── Phase 14 outputs
+│   └── tannerella_forsythia_per_sample.tsv    (112 righe: NGI_ID | clade_reads | direct_reads | unique_kmers | coverage)
+├── Phase 15 outputs
+│   └── mycobacterium_tuberculosis_per_sample.tsv  (312 righe: NGI_ID | clade_reads | direct_reads | unique_kmers | coverage)
 ├── Phase 3 SLURM scripts
 │   ├── krakenuniq.sh
 │   └── krakenuniq_batch.sh

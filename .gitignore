@@ -1,33 +1,35 @@
-# ── Raw data (private until Elisa publishes) ──────────────────────────────
+# Dati privati — non pubblici fino alla pubblicazione
 kraken2_family_matrix.tsv
 krakenuniq_family_matrix.tsv
 metadataGOG.xlsx
 family_correlations.tsv
 pcoa_coordinates.tsv
-family_matrices_report.md
+*_per_sample.tsv
 
-# ── Reports and presentations (personal/draft) ───────────────────────────
-*.pages
-*.pdf
-*.pptx
+# Documenti personali — NON caricare
+application/
+training/
 
-# ── Shell scripts with server paths / credentials ─────────────────────────
-krakenuniq.sh
-krakenuniq_batch.sh
-download_matrices.sh
-
-# ── Misc output / temp ────────────────────────────────────────────────────
-*.Rout
-*.RData
-*.rds
-.Rhistory
-.RData
-
-# ── macOS ─────────────────────────────────────────────────────────────────
-.DS_Store
-
-# ── Folders to exclude ────────────────────────────────────────────────────
+# Plot generati (riproducibili dagli script)
 intersezione/
 tutti/
-training/
-application/
+pcoa_biplot/
+Rplot*.pdf
+
+# File proprietari Apple
+*.pages
+
+# Raw sequencing data
+*.fastq
+*.fastq.gz
+*.bam
+*.sam
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# OS
+.DS_Store
